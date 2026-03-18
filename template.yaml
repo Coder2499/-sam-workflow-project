@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Step Function + 4 Lambdas + EventBridge + SES
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 10
+
+Resources:
+
+  # ------------------
+  # Lambda1
+  # ------------------
+  Lambda1:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: Lambdas/Lambda1
+      Policies:
+        - AmazonSSMReadOnlyAccess
+
+  # ------------------
+  # Lambda2
+  # ------------------
+  Lambda2:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: Lambdas/Lambda2
+
+  # ------------------
+  # Lambda3
+  # ------------------
+  Lambda3:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: Lambdas/Lambda3
+
+  # ------------------
+  # Email Lambda
+  # ------------------
+  EmailLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: Lambdas/Email
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource: "*"
+
+  # ------------------
+  # Step Function Role
+  # ------------------
+  StepFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StepFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+  # ------------------
+  # Step Function
+  # ------------------
+  MyStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: statemachine/workflow.asl.json
+      Role: !GetAtt StepFunctionRole.Arn
+      DefinitionSubstitutions:
+        Lambda1Arn: !GetAtt Lambda1.Arn
+        Lambda2Arn: !GetAtt Lambda2.Arn
+        Lambda3Arn: !GetAtt Lambda3.Arn
+        EmailLambdaArn: !GetAtt EmailLambda.Arn
+
+  # ------------------
+  # S3 Bucket
+  # ------------------
+  MyBucket:
+    Type: AWS::S3::Bucket
+
+  # ------------------
+  # EventBridge Rule
+  # ------------------
+  S3EventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - "aws.s3"
+        detail-type:
+          - "Object Created"
+        resources:
+          - !GetAtt MyBucket.Arn
+      Targets:
+        - Arn: !Ref MyStateMachine
+          Id: "StepFunctionTarget"
+          RoleArn: !GetAtt StepFunctionRole.Arn
+          InputTransformer:
+            InputPathsMap:
+              bucket: "$.detail.bucket.name"
+              key: "$.detail.object.key"
+            InputTemplate: '{"bucket": "<bucket>", "key": "<key>"}'

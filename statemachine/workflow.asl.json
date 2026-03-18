@@ -1,0 +1,26 @@
+{
+  "Comment": "Sample Step Function",
+  "StartAt": "Lambda1",
+  "States": {
+    "Lambda1": {
+      "Type": "Task",
+      "Resource": "${Lambda1Arn}",
+      "Next": "Lambda2"
+    },
+    "Lambda2": {
+      "Type": "Task",
+      "Resource": "${Lambda2Arn}",
+      "Next": "Lambda3"
+    },
+    "Lambda3": {
+      "Type": "Task",
+      "Resource": "${Lambda3Arn}",
+      "Next": "EmailLambda"
+    },
+    "EmailLambda": {
+      "Type": "Task",
+      "Resource": "${EmailLambdaArn}",
+      "End": true
+    }
+  }
+}
