@@ -1,61 +1,23 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: SAM Step Function + 4 Lambdas + EventBridge + SES
+Description: FULLY AUTOMATED WORKFLOW - S3 → EventBridge → Step Function → Lambda → SES
 
 Globals:
   Function:
+    Timeout: 15
     Runtime: python3.11
-    Timeout: 10
 
 Resources:
 
-  # ------------------
-  # Lambda1
-  # ------------------
-  Lambda1:
-    Type: AWS::Serverless::Function
+# ---------------- S3 BUCKET ----------------
+  MyBucket:
+    Type: AWS::S3::Bucket
     Properties:
-      Handler: app.lambda_handler
-      CodeUri: Lambdas/Lambda1
-      Policies:
-        - AmazonSSMReadOnlyAccess
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
 
-  # ------------------
-  # Lambda2
-  # ------------------
-  Lambda2:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: app.lambda_handler
-      CodeUri: Lambdas/Lambda2
-
-  # ------------------
-  # Lambda3
-  # ------------------
-  Lambda3:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: app.lambda_handler
-      CodeUri: Lambdas/Lambda3
-
-  # ------------------
-  # Email Lambda
-  # ------------------
-  EmailLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: app.lambda_handler
-      CodeUri: Lambdas/Email
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - ses:SendEmail
-              Resource: "*"
-
-  # ------------------
-  # Step Function Role
-  # ------------------
+# ---------------- IAM ROLE (STEP FUNCTION) ----------------
   StepFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -76,45 +38,102 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: "*"
 
-  # ------------------
-  # Step Function
-  # ------------------
+# ---------------- LAMBDA 1 (SSM READ) ----------------
+  Lambda1:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: Lambdas/Lambda1/app.handler
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: "*"
+
+# ---------------- LAMBDA 2 (SUCCESS EMAIL) ----------------
+  Lambda2:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: Lambdas/Lambda2/app.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+
+# ---------------- LAMBDA 3 (FAIL EMAIL) ----------------
+  Lambda3:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: Lambdas/Lambda3/app.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
+
+# ---------------- STEP FUNCTION ----------------
   MyStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
-      DefinitionUri: statemachine/workflow.asl.json
       Role: !GetAtt StepFunctionRole.Arn
+      DefinitionUri: statemachine/workflow.asl.json
       DefinitionSubstitutions:
         Lambda1Arn: !GetAtt Lambda1.Arn
         Lambda2Arn: !GetAtt Lambda2.Arn
         Lambda3Arn: !GetAtt Lambda3.Arn
-        EmailLambdaArn: !GetAtt EmailLambda.Arn
 
-  # ------------------
-  # S3 Bucket
-  # ------------------
-  MyBucket:
-    Type: AWS::S3::Bucket
+# ---------------- EVENTBRIDGE ROLE ----------------
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: "*"
 
-  # ------------------
-  # EventBridge Rule
-  # ------------------
+# ---------------- EVENTBRIDGE RULE ----------------
   S3EventRule:
     Type: AWS::Events::Rule
     Properties:
       EventPattern:
         source:
-          - "aws.s3"
+          - aws.s3
         detail-type:
-          - "Object Created"
-        resources:
-          - !GetAtt MyBucket.Arn
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Ref MyBucket
       Targets:
         - Arn: !Ref MyStateMachine
           Id: "StepFunctionTarget"
-          RoleArn: !GetAtt StepFunctionRole.Arn
+          RoleArn: !GetAtt EventBridgeRole.Arn
           InputTransformer:
             InputPathsMap:
               bucket: "$.detail.bucket.name"
               key: "$.detail.object.key"
-            InputTemplate: '{"bucket": "<bucket>", "key": "<key>"}'
+            InputTemplate: |
+              {
+                "bucket": <bucket>,
+                "key": <key>
+              }
+
+Outputs:
+  BucketName:
+    Value: !Ref MyBucket
+  StateMachineArn:
+    Value: !Ref MyStateMachine

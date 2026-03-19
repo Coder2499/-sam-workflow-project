@@ -1,18 +1,22 @@
 import boto3
 
-ssm = boto3.client("ssm")
+ssm = boto3.client('ssm')
 
-def lambda_handler(event, context):
-    print("Lambda1 event:", event)
+def handler(event, context):
+    print("Event:", event)
+
     try:
-        response = ssm.get_parameter(Name="my-config")
-        value = response["Parameter"]["Value"]
+        param = ssm.get_parameter(Name="my-config", WithDecryption=True)
+        value = param['Parameter']['Value']
+
         return {
-            "statusCode": 200,
-            "ssm_value": value
+            "type": "success",
+            "config": value,
+            "input": event
         }
     except Exception as e:
         return {
-            "statusCode": 500,
-            "error": str(e)
+            "type": "fail",
+            "error": str(e),
+            "input": event
         }

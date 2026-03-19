@@ -1,25 +1,30 @@
 {
-  "Comment": "Sample Step Function",
   "StartAt": "Lambda1",
   "States": {
     "Lambda1": {
       "Type": "Task",
       "Resource": "${Lambda1Arn}",
-      "Next": "Lambda2"
+      "Next": "ChoiceState"
+    },
+    "ChoiceState": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.type",
+          "StringEquals": "success",
+          "Next": "Lambda2"
+        }
+      ],
+      "Default": "Lambda3"
     },
     "Lambda2": {
       "Type": "Task",
       "Resource": "${Lambda2Arn}",
-      "Next": "Lambda3"
+      "End": true
     },
     "Lambda3": {
       "Type": "Task",
       "Resource": "${Lambda3Arn}",
-      "Next": "EmailLambda"
-    },
-    "EmailLambda": {
-      "Type": "Task",
-      "Resource": "${EmailLambdaArn}",
       "End": true
     }
   }
